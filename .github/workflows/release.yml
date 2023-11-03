@@ -66,7 +66,7 @@ jobs:
       - name: Push PR release branch
         run: git push origin release-from-pr-${{ inputs.version }}
       - name: Create Pull Request Release
-        run: gh pr create --title="Release Version ${{ inputs.version }}" --base main -b "New Release ${{ inputs.version }}"
+        run: gh pr create --title="Release Version ${{ inputs.version }}" --base main --head release-from-pr-${{ inputs.version }} -b "New Release ${{ inputs.version }}"
 
 #
 #  maven_central_deploy:
