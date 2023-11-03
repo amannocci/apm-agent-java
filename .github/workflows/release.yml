@@ -64,7 +64,7 @@ jobs:
       - name: Bump version and add git tag
         run: ./mvnw release:prepare -B -DpushChanges=false -Darguments="-DskipTests -Dmaven.javadoc.skip=true" -DreleaseVersion=${{ inputs.version }}
       - name: Push PR release branch
-        run: git push origin release-from-pr-${{ inputs.version }}
+        run: git push origin release-from-pr-${{ inputs.version }} --tags
       - name: Create Pull Request Release
         run: gh pr create --title="Release Version ${{ inputs.version }}" --base main --head release-from-pr-${{ inputs.version }} -b "New Release ${{ inputs.version }}"
 
