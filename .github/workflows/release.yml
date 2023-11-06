@@ -51,7 +51,12 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: ${{ env.JAVA_DIST }}
           cache: 'maven'
-      # TODO: Lock main branch
+      # TODO: Define if we use lock/unlock branch feature
+      #      - uses: elastic/apm-pipeline-library/.github/actions/branch-lock@feat/action-branch-lock
+      #        with:
+      #          lock: 'true'
+      #          branch: 'main'
+      #          token: ${{ secrets.PAT }}
       - name: Create a PR release branch
         run: git checkout -b release-from-pr-${{ inputs.version }}
       - name: Prepare changelog for release
@@ -77,46 +82,40 @@ jobs:
       - name: Placeholder for buildkite
         run: echo "Buildkite build"
       # TODO: Use buildkite instead of placeholder
-#      - id: buildkite
-#        continue-on-error: true
-#        name: Run Deploy
-#        uses: elastic/apm-pipeline-library/.github/actions/buildkite@current
-#        with:
-#          vaultUrl: ${{ secrets.VAULT_ADDR }}
-#          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
-#          vaultSecretId: ${{ secrets.VAULT_SECRET_ID }}
-#          pipeline: apm-agent-java-release
-#          pipelineBranch: release-from-pr-${{ inputs.version }}
-#          pipelineCommit: ${{ env.TAG_NAME }}
-#          waitFor: true
-#          printBuildLogs: false
-#          # The action fails with .github/actions/buildkite/run.sh: line 24: 3: parameter missing.
-#          # Which is an unexpected bug.
-#          # Adding a random buildEnvVar to circumvent the behaviour.
-#          buildEnvVars: |
-#            something_something=true
-#
-#  notify:
-#    if: always()
-#    needs:
-#      - prepare_release
-#      - maven_central_deploy
-#      - await_artifact_on_maven_central
-#      - update_major_branch
-#      - update_cloudfoundry
-#      - build_and_push_docker_images
-#      - publish_aws_lambda
-#      - create_github_release
-#    runs-on: ubuntu-latest
-#    steps:
-#      - id: check
-#        uses: elastic/apm-pipeline-library/.github/actions/check-dependent-jobs@current
-#        with:
-#          needs: ${{ toJSON(needs) }}
-#      - uses: elastic/apm-pipeline-library/.github/actions/notify-build-status@current
-#        with:
-#          status: ${{ steps.check.outputs.status }}
-#          vaultUrl: ${{ secrets.VAULT_ADDR }}
-#          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
-#          vaultSecretId: ${{ secrets.VAULT_SECRET_ID }}
-#          slackChannel: "#apm-agent-java"
+      #  - id: buildkite
+      #    continue-on-error: true
+      #    name: Run Deploy
+      #    uses: elastic/apm-pipeline-library/.github/actions/buildkite@current
+      #    with:
+      #      vaultUrl: ${{ secrets.VAULT_ADDR }}
+      #      vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+      #      vaultSecretId: ${{ secrets.VAULT_SECRET_ID }}
+      #      pipeline: apm-agent-java-release
+      #      pipelineBranch: release-from-pr-${{ inputs.version }}
+      #      pipelineCommit: ${{ env.TAG_NAME }}
+      #      waitFor: true
+      #      printBuildLogs: false
+      #      # The action fails with .github/actions/buildkite/run.sh: line 24: 3: parameter missing.
+      #      # Which is an unexpected bug.
+      #      # Adding a random buildEnvVar to circumvent the behaviour.
+      #      buildEnvVars: |
+      #        something_something=true
+
+  notify:
+    if: always()
+    needs:
+      - create_pr
+      - maven_central_deploy
+    runs-on: ubuntu-latest
+    steps:
+      - id: check
+        uses: elastic/apm-pipeline-library/.github/actions/check-dependent-jobs@current
+        with:
+          needs: ${{ toJSON(needs) }}
+      - uses: elastic/apm-pipeline-library/.github/actions/notify-build-status@current
+        with:
+          status: ${{ steps.check.outputs.status }}
+          vaultUrl: ${{ secrets.VAULT_ADDR }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultSecretId: ${{ secrets.VAULT_SECRET_ID }}
+          slackChannel: "#apm-agent-java-dev-release"
