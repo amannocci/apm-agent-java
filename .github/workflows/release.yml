@@ -41,7 +41,7 @@ jobs:
           username: ${{ env.GIT_USER }}
           email: ${{ env.GIT_EMAIL }}
           token: ${{ env.GITHUB_TOKEN }}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.branch }}
           token: ${{ env.GITHUB_TOKEN }}
@@ -68,14 +68,15 @@ jobs:
       - name: Create Pull Request Release
         run: gh pr create --title="Release Version ${{ inputs.version }}" --base main --head release-from-pr-${{ inputs.version }} -b "New Release ${{ inputs.version }}"
 
-#
-#  maven_central_deploy:
-#    name: "Deploy to Maven Central (Buildkite)"
-#    if: ${{ ! inputs.skip_maven_deploy && ( inputs.skip_preparation || success() ) }}
-#    runs-on: ubuntu-latest
-#    needs:
-#      - create_pr
-#    steps:
+  maven_central_deploy:
+    name: "Deploy to Maven Central (Buildkite)"
+    runs-on: ubuntu-latest
+    needs:
+      - create_pr
+    steps:
+      - name: Placeholder for buildkite
+        run: echo "Buildkite build"
+      # TODO: Use buildkite instead of placeholder
 #      - id: buildkite
 #        continue-on-error: true
 #        name: Run Deploy
@@ -85,7 +86,8 @@ jobs:
 #          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
 #          vaultSecretId: ${{ secrets.VAULT_SECRET_ID }}
 #          pipeline: apm-agent-java-release
-#          pipelineVersion: ${{ env.TAG_NAME }}
+#          pipelineBranch: release-from-pr-${{ inputs.version }}
+#          pipelineCommit: ${{ env.TAG_NAME }}
 #          waitFor: true
 #          printBuildLogs: false
 #          # The action fails with .github/actions/buildkite/run.sh: line 24: 3: parameter missing.
