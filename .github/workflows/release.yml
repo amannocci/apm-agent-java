@@ -51,7 +51,11 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: ${{ env.JAVA_DIST }}
           cache: 'maven'
-      # TODO: Lock main branch
+      - uses: elastic/apm-pipeline-library/.github/actions/manage-branch@feat/python-branch-lock
+        with:
+          lock: '"false, pattern: \"something\""'
+          branch: 'main'
+          token: ${{ secrets.PAT }}
       - name: Create a PR release branch
         run: git checkout -b release-from-pr-${{ inputs.version }}
       - name: Prepare changelog for release
