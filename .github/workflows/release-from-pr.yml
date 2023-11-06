@@ -4,8 +4,8 @@
 name: Release On PR
 
 on:
-  pull_request:
-    types: [closed]
+  pull_request_review:
+    types: [submitted]
     branches:
       - main
     paths:
@@ -22,14 +22,14 @@ concurrency:
   group: ${{ github.workflow }}
 
 jobs:
-  check_is_release:
+  check:
     name: "Check release from PR"
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
+    if: github.event.review.state == 'approved'
     outputs:
-      is_release: ${{ steps.check_is_release.outputs.is_release }}
+      is_release: ${{ steps.check.outputs.is_release }}
     steps:
-      - id: check_is_release
+      - id: check
         name: Check for specific release label
         run: |
           LABEL="release"
@@ -42,40 +42,98 @@ jobs:
             echo "::set-output name=is_release::true"
           fi
 
-  prepare_release:
-    name: "Find latest tag & Unlock"
+  merge_ff:
+    name: "Unlock & Merge FF"
     runs-on: ubuntu-latest
     needs:
-      - check_is_release
-    if: needs.check_is_release.outputs.is_release == 'true'
+      - check
+    if: needs.check.outputs.is_release == 'true'
     steps:
+      - uses: elastic/apm-pipeline-library/.github/actions/github-token@current
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+      - uses: elastic/apm-pipeline-library/.github/actions/setup-git@current
+        with:
+          username: ${{ env.GIT_USER }}
+          email: ${{ env.GIT_EMAIL }}
+          token: ${{ env.GITHUB_TOKEN }}
       - uses: actions/checkout@v4
         with:
-          ref: 'main'
-      - name: Find latest tag
-        run: echo "TAG_NAME=$(git describe --abbrev=0)" >> ${GITHUB_ENV}
-      # TODO: Unlock branch
-      # TODO: Wait for real
-#      - name: Await artifacts published in maven central
-#        shell: bash
-#        timeout-minutes: 120
-#        run: |
-#          until .ci/release/wait_maven_artifact_published.sh ${TAG_NAME}
-#          do
-#            echo "Artifacts not found on maven central. Sleeping 30 seconds, retrying afterwards"
-#            sleep 30s
-#          done
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ env.GITHUB_TOKEN }}
+# TODO: Define if we use lock/unlock branch feature
+#      - uses: elastic/apm-pipeline-library/.github/actions/branch-lock@feat/action-branch-lock
+#        with:
+#          lock: 'false'
+#          branch: 'main'
+#          token: ${{ secrets.PAT }}
+      - name: Merge the PR branch into the base branch
+        run: |
+          # Fetch the base branch
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          git checkout ${{ github.event.pull_request.base.ref }}
+            
+          # Try a fast-forward merge
+          # If it fails, the workflow will stop and the PR will not be merged
+          git merge --ff-only ${{ github.event.pull_request.head.ref }}
+            
+          # Push the changes to the base branch
+          git push origin ${{ github.event.pull_request.base.ref }}
+
+  prepare_release:
+    name: "Find tag & Wait propagation"
+    runs-on: ubuntu-latest
+    needs:
+      - check
+      - merge_ff
+    if: needs.check.outputs.is_release == 'true'
+    outputs:
+      tag_name: ${{ steps.tag.outputs.name }}
+    steps:
+      - id: tag
+        name: Find latest tag
+        uses: actions/github-script@v6
+        with:
+          result-encoding: string
+          retries: 3
+          script: |
+            const tags = await github.rest.repos.listTags({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 1
+            });
+            const tag = tags.data[0].name;
+            core.info(`Latest tag: ${tag}`);
+            core.setOutput('name', tag);
+
+# TODO: Wait for real
+#        - name: Await artifacts published in maven central
+#          shell: bash
+#          timeout-minutes: 120
+#          run: |
+#            until .ci/release/wait_maven_artifact_published.sh ${TAG_NAME}
+#            do
+#              echo "Artifacts not found on maven central. Sleeping 30 seconds, retrying afterwards"
+#              sleep 30s
+#            done
 
   build_and_push_docker_images:
     name: "Build and push docker images"
     runs-on: ubuntu-latest
     needs:
-      - check_is_release
+      - check
+      - merge_ff
       - prepare_release
-    if: needs.check_is_release.outputs.is_release == 'true'
+    if: needs.check.outputs.is_release == 'true'
     env:
       SONATYPE_FALLBACK: 1
     steps:
+      - name: Set tag name
+        run: |
+          echo "TAG_NAME=${{ needs.prepare_release.outputs.tag_name }}" >> ${GITHUB_ENV}
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG_NAME }}
@@ -91,15 +149,17 @@ jobs:
         shell: bash
         run: |
           ./scripts/docker-release/build_docker.sh
-# TODO: Push for real         ./scripts/docker-release/push_docker.sh
+# TODO: Push for real
+#          ./scripts/docker-release/push_docker.sh
 
   publish_aws_lambda:
     name: "Publish AWS Lambda"
     runs-on: ubuntu-latest
     needs:
-      - check_is_release
+      - check
+      - merge_ff
       - prepare_release
-    if: needs.check_is_release.outputs.is_release == 'true'
+    if: needs.check.outputs.is_release == 'true'
     outputs:
       arn_content: ${{ steps.arn_output.outputs.arn_content }}
     env:
@@ -107,6 +167,9 @@ jobs:
       # The default region does not matter, since we are publishing in all regions.
       AWS_DEFAULT_REGION: eu-west-1
     steps:
+      - name: Set tag name
+        run: |
+          echo "TAG_NAME=${{ needs.prepare_release.outputs.tag_name }}" >> ${GITHUB_ENV}
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG_NAME }}
@@ -132,8 +195,8 @@ jobs:
           # Convert v1.2.3 to ver-1-2-3
           VERSION=${TAG_NAME/v/ver-}
           VERSION=${VERSION//./-}
-          
-#        TODO: Publish for real  ELASTIC_LAYER_NAME="elastic-apm-java-${VERSION}" .ci/publish-aws.sh
+# TODO: Publish for real
+#          ELASTIC_LAYER_NAME="elastic-apm-java-${VERSION}" .ci/publish-aws.sh
       - uses: actions/upload-artifact@v3
         with:
           name: arn-file
@@ -155,6 +218,9 @@ jobs:
 #    permissions:
 #      contents: write
 #    steps:
+#      - name: Set tag name
+#        run: |
+#          echo "TAG_NAME=${{ needs.prepare_release.outputs.tag_name }}" >> ${GITHUB_ENV}
 #      - uses: actions/checkout@v4
 #        with:
 #          ref: ${{ env.TAG_NAME }}
@@ -179,27 +245,25 @@ jobs:
 #            --notes="[Release Notes for ${{ env.TAG_NAME }}](https://www.elastic.co/guide/en/apm/agent/java/current/release-notes-${{ steps.get_dotx_branch.outputs.dotx_branch }}.html#release-notes-${{ env.TAG_NAME }})
 #            ${{ needs.publish_aws_lambda.outputs.arn_content }}"
 
-#  notify:
-#    if: always()
-#    needs:
-#      - prepare_release
-#      - maven_central_deploy
-#      - await_artifact_on_maven_central
+  notify:
+    needs:
+      - check
 #      - update_major_branch
-#      - update_cloudfoundry
-#      - build_and_push_docker_images
-#      - publish_aws_lambda
+      - build_and_push_docker_images
+      - publish_aws_lambda
 #      - create_github_release
-#    runs-on: ubuntu-latest
-#    steps:
-#      - id: check
-#        uses: elastic/apm-pipeline-library/.github/actions/check-dependent-jobs@current
-#        with:
-#          needs: ${{ toJSON(needs) }}
-#      - uses: elastic/apm-pipeline-library/.github/actions/notify-build-status@current
-#        with:
-#          status: ${{ steps.check.outputs.status }}
-#          vaultUrl: ${{ secrets.VAULT_ADDR }}
-#          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
-#          vaultSecretId: ${{ secrets.VAULT_SECRET_ID }}
-#          slackChannel: "#apm-agent-java"
+# TODO: Alternative to always if the workflow run
+    if: needs.check.outputs.is_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - id: check
+        uses: elastic/apm-pipeline-library/.github/actions/check-dependent-jobs@current
+        with:
+          needs: ${{ toJSON(needs) }}
+      - uses: elastic/apm-pipeline-library/.github/actions/notify-build-status@current
+        with:
+          status: ${{ steps.check.outputs.status }}
+          vaultUrl: ${{ secrets.VAULT_ADDR }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultSecretId: ${{ secrets.VAULT_SECRET_ID }}
+          slackChannel: "#apm-agent-java-dev-release"
