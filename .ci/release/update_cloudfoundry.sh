@@ -3,18 +3,11 @@
 set -euo pipefail
 source "$(dirname "${0}")/util.sh"
 
-REMOTE_NAME=origin
-BRANCH_NAME=main
 BASE_URL=https://repo1.maven.org/maven2/co/elastic/apm/elastic-apm-agent
 CF_FILE=cloudfoundry/index.yml
 
 check_version "${1:-}"
 v="${1:-}"
-
-echo -e "\n--- fetch & ensure clean state of ${REMOTE_NAME}/${BRANCH_NAME}"
-git fetch ${REMOTE_NAME} ${BRANCH_NAME}
-git checkout ${BRANCH_NAME}
-git reset --hard ${REMOTE_NAME}/${BRANCH_NAME}
 
 echo -e "\n--- update ${CF_FILE} if required"
 
